@@ -19,6 +19,8 @@ class BoostingClassifier:
         self.Y = None
         self.T = 10
         
+        self.m_t = None
+        self.w = None
         
         self.m = []
         
@@ -39,19 +41,41 @@ class BoostingClassifier:
 
         # Calculate weighted least squares solution
         
+        # Calculate weighted least squares solution
         W = np.diag(weights)
-        inverse = np.linalg.inv(X.T.dot(W).dot(X))
-        w = inverse.dot(X.T).dot(W).dot(y)
+        XTW = X.T.dot(W)
+        XTW_X = XTW.dot(X)
+        inverse = np.linalg.pinv(XTW_X)  # Use pseudo-inverse for better numerical stability
+        w = inverse.dot(XTW).dot(y)
+        
+        # set the class in the original
+        self.w = w
 
-        # Calculate weighted error
+        # Calculate predictions and weighted error
+        # print(f'LINEAR CLASSIFER: -> X.shape = {X.shape}, w.shape = {w.shape}')
         pred = X.dot(w)
         pred[pred >= 0] = 1
         pred[pred < 0] = -1
         error = np.sum(weights[y != pred])
         
-        print("Linear Classifier: Preds Size = ", pred.size, w)
+        false_predictions = []
+        true_predictions = []
+        
+        
+        # for loop to create a list of true predictions / false predictions to return to fit()
+        for i in range(self.n_samples):
+            if y[i] == pred[i]:
+                true_predictions.append(i)
+            else:
+                false_predictions.append(i)
+        
+        # # print(f'CLASSIFIER: -> true predictions: ({len(true_predictions)}) {true_predictions}')
+        # print(f'CLASSIFIER: -> false predictions: ({len(false_predictions)}) {false_predictions}')
+        # print(f'CLASSIFIER: -> W result: {w}, length: {w.shape}')
 
-        return w, error
+        # print("CLASSIFIER: -> Preds Size = ", pred.size, w)
+        
+        return w, error, true_predictions, false_predictions
         
         
     def fit(self, X, y):
@@ -74,20 +98,40 @@ class BoostingClassifier:
         self.n_features = n_features
         
         
-        
         # start with uniform weights
         self.weights = np.full(n_samples, 1.0/n_samples)
         
-        new_weights, error = self.linear_classifier(X, y, weights=self.weights)
-        
-        print(new_weights.shape, error)
         
         # reiterate on the classifier T times
         for i in range(self.T):
             # calculate predictions
+            m_t, error_t, true_preds, false_preds = self.linear_classifier(X, y, weights=self.weights)
+            self.m.append(m_t)
+            self.m_t = m_t
+            # print(f"T = {i} | fit(): model / error: ", m_t.shape, error_t)
             
-            pass
-
+            if error_t >= 1/2:
+                break
+            
+            a_t = self.base_learning_algorithm(error_t=error_t)
+            
+            print("BEFORE: -> ", self.m_t)
+            # self.m_t = self.m_t.dot(a_t)
+            self.w = self.w.dot(a_t)
+            
+            print("AFTER: -> ", self.m_t)
+            
+            # update weights for 
+            for j in range(len(false_preds)):
+                index = false_preds[j]
+                self.weights[index] = self.weights[index]/(2*error_t)
+            
+            # update weights correctly classified instances
+            for j in range(len(true_preds)):
+                index = true_preds[i]
+                self.weights[index] = self.weights[index]/(2*(1-error_t))
+            
+            
         return self
 
     def predict(self, X): 
@@ -102,5 +146,13 @@ class BoostingClassifier:
         y_pred : { numpy.ndarray } of shape (n_samples)
                  In this sample submission file, we generate all ones predictions.
         """
-        return np.ones(X.shape[0], dtype=int)
+        
+        
+        X = np.c_[X, np.ones(self.n_samples)]
+        # print(f'PREDICT: -> X.shape = {X.shape}, self.w.shape = {self.w.shape}')
+        pred = X.dot(self.w)
+        pred[pred >= 0] = 1
+        pred[pred < 0] = -1
+        
+        return pred
 
